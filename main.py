@@ -6,7 +6,7 @@ import pandas as pd
 app = Flask(__name__)
 
 # Tu API Key de Alpha Vantage (puedes cambiarla por la tuya)
-API_KEY = "TU_API_KEY_AQUI" 
+API_KEY = "BQ3V0609A135ESMI" 
 
 @app.route('/escanner/<simbolo>', methods=['GET'])
 def obtener_escanner(simbolo):
