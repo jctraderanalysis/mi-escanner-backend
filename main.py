@@ -1,102 +1,89 @@
 import os
 from flask import Flask, jsonify
-import requests
+import yfinance as yf
 import pandas as pd
 
 app = Flask(__name__)
 
-# Tu API Key de Alpha Vantage (puedes cambiarla por la tuya)
-API_KEY = "BQ3V0609A135ESMI" 
-
 @app.route('/escanner/<simbolo>', methods=['GET'])
 def obtener_escanner(simbolo):
     try:
-        simbolo_upper = simbolo.upper().replace("-", "")
-        
-        # 1. DETECTAR EL TIPO DE ACTIVO Y ARMAR LA URL CORRECTA
-        
-        # CASO A: CRIPTOMONEDAS (Si empieza con BTC, ETH, SOL, etc. y termina en USD)
-        if any(crypto in simbolo_upper for crypto in ["BTC", "ETH", "SOL", "XRP", "ADA"]):
-            # Para Crypto en minutos, Alpha Vantage usa CRYPTO_INTRADAY
-            market = "USD"
-            # Extraemos la moneda base (ej: BTC)
-            coin = simbolo_upper.replace("USD", "") if "USD" in simbolo_upper else simbolo_upper
-            url = f"https://www.alphavantage.co/query?function=CRYPTO_INTRADAY&symbol={coin}&market={market}&interval=15min&outputsize=compact&apikey={API_KEY}"
-            time_series_key = "Time Series Crypto (15min)"
-            
-        # CASO B: ORO (XAUUSD o si usas el ETF GLD)
-        elif "XAU" in simbolo_upper or simbolo_upper == "GLD":
-            # El oro físico spot como XAU/USD a veces requiere cuenta premium en intradía en Alpha Vantage.
-            # Como alternativa infalible para cuentas gratis, usamos el ETF del Oro (GLD) que se mueve idéntico.
-            ticker = "GLD" if simbolo_upper == "XAUUSD" else simbolo_upper
-            url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={ticker}&interval=15min&outputsize=compact&apikey={API_KEY}"
-            time_series_key = "Time Series (15min)"
-            
-        # CASO C: FOREX (Si tiene 6 letras como EURUSD, GBPUSD, USDJPY)
-        elif len(simbolo_upper) == 6:
-            from_currency = simbolo_upper[:3]
-            to_currency = simbolo_upper[3:]
-            url = f"https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol={from_currency}&to_symbol={to_currency}&interval=15min&outputsize=compact&apikey={API_KEY}"
-            time_series_key = "Time Series FX (15min)"
-            
-        # CASO D: ACCIONES (Por si acaso, ej: AAPL, TSLA)
-        else:
-            url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={simbolo_upper}&interval=15min&outputsize=compact&apikey={API_KEY}"
-            time_series_key = "Time Series (15min)"
+        simbolo_upper = simbolo.upper().replace("-", "").replace("/", "")
+        ticker_yahoo = ""
 
-        # 2. PETICIÓN AL SERVIDOR
-        data = requests.get(url).json()
-        time_series = data.get(time_series_key, {})
+        # 1. TRADUCIR EL SÍMBOLO AL FORMATO DE YAHOO FINANCE
         
-        if not time_series:
-            error_msg = data.get("Note") or data.get("Error Message") or f"No se encontraron datos intradía para {simbolo}. Nota: Las cuentas gratis de Alpha Vantage limitan las peticiones por minuto."
-            return jsonify({"error": error_msg}), 404
+        # CASO A: ORO
+        if "XAU" in simbolo_upper or simbolo_upper == "GLD":
+            ticker_yahoo = "GC=F"  # Futuros del Oro en tiempo real
+            
+        # CASO B: CRIPTOMONEDAS
+        elif any(crypto in simbolo_upper for crypto in ["BTC", "ETH", "SOL", "XRP", "ADA"]):
+            # Si escribes BTCUSD lo transforma en BTC-USD
+            base = simbolo_upper.replace("USD", "") if "USD" in simbolo_upper else simbolo_upper
+            ticker_yahoo = f"{base}-USD"
+            
+        # CASO C: FOREX (6 letras como EURUSD)
+        elif len(simbolo_upper) == 6:
+            ticker_yahoo = f"{simbolo_upper}=X"
+            
+        # CASO D: ACCIONES (Ej: AAPL, TSLA)
+        else:
+            ticker_yahoo = simbolo_upper
+
+        # 2. DESCARGAR DATOS INTRADÍA DE 15 MINUTOS
+        # Pedimos el intervalo de 15m y los datos de los últimos 5 días
+        ticker = yf.Ticker(ticker_yahoo)
+        df = ticker.history(interval="15m", period="5d")
+
+        if df.empty:
+            return jsonify({"error": f"No se encontraron datos en Yahoo Finance para el ticker: {ticker_yahoo}"}), 404
+
+        # Limpiamos los nombres de las columnas para asegurar compatibilidad
+        df.columns = [col.lower() for col in df.columns]
+
+        # 3. CÁLCULO DE LAS EMAs (Tu lógica de análisis)
+        df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+        df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+        df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+
+        # Tomamos el último registro cerrado para el análisis
+        ultima_vela = df.iloc[-1]
         
-        # 2. Calcular EMAs exactas de tu indicador
-        df['EMA30'] = df['close'].ewm(span=30, adjust=False).mean()
-        df['EMA50'] = df['close'].ewm(span=50, adjust=False).mean()
-        df['EMA100'] = df['close'].ewm(span=100, adjust=False).mean()
-        df['EMA200'] = df['close'].ewm(span=200, adjust=False).mean()
-        df['EMA_Pullback'] = df['close'].ewm(span=50, adjust=False).mean()
-        
-        ultima_vela = df.iloc[-2]
-        c1 = ultima_vela['close']
-        h1 = ultima_vela['high']
-        l1 = ultima_vela['low']
-        
-        m30 = ultima_vela['EMA30']
-        m50 = ultima_vela['EMA50']
-        m100 = ultima_vela['EMA100']
-        m200 = ultima_vela['EMA200']
-        mp = ultima_vela['EMA_Pullback']
-        
-        estado = "RANGO"
-        
-        # 3. Lógica analítica exacta de MQL4
-        if m30 > m50 and m50 > m100 and m100 > m200:
-            if c1 > m30:
-                estado = "COMPRA"
-            elif l1 <= mp:
-                estado = "PULLBACK"
-        elif m30 < m50 and m50 < m100 and m100 < m200:
-            if c1 < m30:
-                estado = "VENTA"
-            elif h1 >= mp:
-                estado = "PULLBACK"
-                
+        precio_actual = float(ultima_vela['close'])
+        ema9_val = float(ultima_vela['ema9'])
+        ema21_val = float(ultima_vela['ema21'])
+        ema50_val = float(ultima_vela['ema50'])
+        ema200_val = float(ultima_vela['ema200'])
+
+        # Lógica de Tendencia / Estado
+        if precio_actual > ema9_val > ema21_val > ema50_val > ema200_val:
+            estado = "COMPRA"
+        elif precio_actual < ema9_val < ema21_val < ema50_val < ema200_val:
+            estado = "VENTA"
+        elif ema9_val > ema21_val and precio_actual < Sc := ema21_val:
+            estado = "PULLBACK"
+        else:
+            estado = "RANGO"
+
+        # 4. RESPUESTA LIMPIA PARA FLUTTERFLOW
         return jsonify({
-            "simbolo": simbolo,
-            "temporalidad": "M15",
+            "simbolo": simbolo_upper,
+            "ticker_usado": ticker_yahoo,
+            "precio": round(precio_actual, 5),
             "estado": estado,
-            "precio_actual": c1
+            "emas": {
+                "ema9": round(ema9_val, 5),
+                "ema21": round(ema21_val, 5),
+                "ema50": round(ema50_val, 5),
+                "ema200": round(ema200_val, 5)
+            }
         })
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({"mensaje": "Servidor del escáner activo y corriendo perfectamente"})
-
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
