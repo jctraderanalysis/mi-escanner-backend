@@ -62,7 +62,7 @@ def obtener_escanner(simbolo):
             estado = "COMPRA"
         elif precio_actual < ema9_val < ema21_val < ema50_val < ema200_val:
             estado = "VENTA"
-        elif ema9_val > ema21_val and precio_actual < Sc := ema21_val:
+        elif ema9_val > ema21_val and precio_actual < ema21_val:
             estado = "PULLBACK"
         else:
             estado = "RANGO"
