@@ -11,13 +11,29 @@ API_KEY = "BQ3V0609A135ESMI"
 @app.route('/escanner/<simbolo>', methods=['GET'])
 def obtener_escanner(simbolo):
     try:
-        # 1. Traer datos de Alpha Vantage
-        url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={simbolo}&interval=15min&outputsize=full&apikey={API_KEY}"
-        data = requests.get(url).json()
+        # 1. Detectar si es Forex o Acción y armar la URL correcta
+        simbolo_upper = simbolo.upper()
         
-        time_series = data.get("Time Series (15min)", {})
+        # Si tiene 6 letras (como EURUSD) o un guion, asumimos que es Forex
+        if len(simbolo_upper) == 6 or "-" in simbolo_upper:
+            # Limpiamos el guion si existe (transforma EUR-USD en EURUSD)
+            fx_sym = simbolo_upper.replace("-", "")
+            from_currency = fx_sym[:3]
+            to_currency = fx_sym[3:]
+            url = f"https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol={from_currency}&to_symbol={to_currency}&interval=15min&outputsize=compact&apikey={API_KEY}"
+            time_series_key = "Time Series FX (15min)"
+        else:
+            # Si es una acción (como AAPL)
+            url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={simbolo_upper}&interval=15min&outputsize=compact&apikey={API_KEY}"
+            time_series_key = "Time Series (15min)"
+
+        data = requests.get(url).json()
+        time_series = data.get(time_series_key, {})
+        
         if not time_series:
-            return jsonify({"error": "No se encontraron datos para este símbolo"}), 404
+            # Si Alpha Vantage nos da un mensaje de error o límite, lo mostramos para saber qué pasa
+            error_msg = data.get("Note") or data.get("Error Message") or "No se encontraron datos para este símbolo"
+            return jsonify({"error": error_msg}), 404
             
         df = pd.DataFrame.from_dict(time_series, orient='index').astype(float)
         df = df.iloc[::-1]
