@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import yfinance as yf
 import pandas as pd
 
@@ -11,45 +11,40 @@ def obtener_escanner(simbolo):
         simbolo_upper = simbolo.upper().replace("-", "").replace("/", "")
         ticker_yahoo = ""
 
-        # 1. TRADUCIR EL SÍMBOLO AL FORMATO DE YAHOO FINANCE
-        
-        # CASO A: ORO
+        # 1. CAPTURAR EMAs DINÁMICAS DESDE LA APP (Con valores por defecto si no se envían)
+        periodo_ema9 = int(request.args.get('ema9', 9))
+        periodo_ema21 = int(request.args.get('ema21', 21))
+        periodo_ema50 = int(request.args.get('ema50', 50))
+        periodo_ema200 = int(request.args.get('ema200', 200))
+
+        # 2. TRADUCIR EL SÍMBOLO AL FORMATO DE YAHOO FINANCE
         if "XAU" in simbolo_upper or simbolo_upper == "GLD":
-            ticker_yahoo = "GC=F"  # Futuros del Oro en tiempo real
-            
-        # CASO B: CRIPTOMONEDAS
+            ticker_yahoo = "GC=F"  
         elif any(crypto in simbolo_upper for crypto in ["BTC", "ETH", "SOL", "XRP", "ADA"]):
-            # Si escribes BTCUSD lo transforma en BTC-USD
             base = simbolo_upper.replace("USD", "") if "USD" in simbolo_upper else simbolo_upper
             ticker_yahoo = f"{base}-USD"
-            
-        # CASO C: FOREX (6 letras como EURUSD)
         elif len(simbolo_upper) == 6:
             ticker_yahoo = f"{simbolo_upper}=X"
-            
-        # CASO D: ACCIONES (Ej: AAPL, TSLA)
         else:
             ticker_yahoo = simbolo_upper
 
-        # 2. DESCARGAR DATOS INTRADÍA DE 15 MINUTOS
-        # Pedimos el intervalo de 15m y los datos de los últimos 5 días
+        # 3. DESCARGAR DATOS
         ticker = yf.Ticker(ticker_yahoo)
         df = ticker.history(interval="15m", period="5d")
 
         if df.empty:
             return jsonify({"error": f"No se encontraron datos en Yahoo Finance para el ticker: {ticker_yahoo}"}), 404
 
-        # Limpiamos los nombres de las columnas para asegurar compatibilidad
         df.columns = [col.lower() for col in df.columns]
 
-        # 3. CÁLCULO DE LAS EMAs (Tu lógica de análisis)
-        df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
-        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-        df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-        df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+        # 4. CÁLCULO DE LAS EMAs CONFIGURABLES
+        df['ema9'] = df['close'].ewm(span=periodo_ema9, adjust=False).mean()
+        df['ema21'] = df['close'].ewm(span=periodo_ema21, adjust=False).mean()
+        df['ema50'] = df['close'].ewm(span=periodo_ema50, adjust=False).mean()
+        df['ema200'] = df['close'].ewm(span=periodo_ema200, adjust=False).mean()
 
-        # Tomamos el último registro cerrado para el análisis
         ultima_vela = df.iloc[-1]
+        vela_anterior = df.iloc[-2]  # Necesaria para detectar el cruce/toque del pullback
         
         precio_actual = float(ultima_vela['close'])
         ema9_val = float(ultima_vela['ema9'])
@@ -57,27 +52,41 @@ def obtener_escanner(simbolo):
         ema50_val = float(ultima_vela['ema50'])
         ema200_val = float(ultima_vela['ema200'])
 
-        # Lógica de Tendencia / Estado
-        if precio_actual > ema9_val > ema21_val > ema50_val > ema200_val:
-            estado = "COMPRA"
-        elif precio_actual < ema9_val < ema21_val < ema50_val < ema200_val:
-            estado = "VENTA"
-        elif ema9_val > ema21_val and precio_actual < ema21_val:
-            estado = "PULLBACK"
-        else:
-            estado = "RANGO"
+        # 5. ESTRATEGIA EXTREMA: TENDENCIA Y PULLBACK EN EMA 50
+        # Tendencias Estructurales de las Medias
+        estructura_alcista = ema9_val > ema21_val > ema50_val > ema200_val
+        estructura_bajista = ema9_val < ema21_val < ema50_val < ema200_val
 
-        # 4. RESPUESTA LIMPIA PARA FLUTTERFLOW
+        # DETECCIÓN DE PULLBACK EN LA EMA 50:
+        # Pullback Alcista: Tendencia mayor es alcista, pero el precio baja a testear o tocar la EMA 50
+        pullback_alcista = estructura_alcista and (ultima_vela['low'] <= ema50_val and precio_actual >= ema50_val)
+        
+        # Pullback Bajista: Tendencia mayor es bajista, pero el precio sube a testear o tocar la EMA 50
+        pullback_bajista = estructura_bajista and (ultima_vela['high'] >= ema50_val and precio_actual <= ema50_val)
+
+        # Asignación del Estado final para tus botones
+        if pullback_alcista:
+            estado = "PULLBACK ALCISTA"
+        elif pullback_bajista:
+            estado = "PULLBACK BAJISTA"
+        elif estructura_alcista and precio_actual > ema9_val:
+            estado = "ALCISTA"
+        elif estructura_bajista and precio_actual < ema9_val:
+            estado = "BAJISTA"
+        else:
+            estado = "NEUTRO"
+
+        # 6. RESPUESTA DINÁMICA
         return jsonify({
             "simbolo": simbolo_upper,
             "ticker_usado": ticker_yahoo,
             "precio": round(precio_actual, 5),
             "estado": estado,
-            "emas": {
-                "ema9": round(ema9_val, 5),
-                "ema21": round(ema21_val, 5),
-                "ema50": round(ema50_val, 5),
-                "ema200": round(ema200_val, 5)
+            "emas_configuradas": {
+                f"ema{periodo_ema9}": round(ema9_val, 5),
+                f"ema{periodo_ema21}": round(ema21_val, 5),
+                f"ema{periodo_ema50}": round(ema50_val, 5),
+                f"ema{periodo_ema200}": round(ema200_val, 5)
             }
         })
 
