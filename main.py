@@ -35,7 +35,7 @@ st.title("📊 Cuadro de Mando Multitemporal Avanzado")
 # NUEVO: CAMPOS DE CORREO VISIBLES TODO EL TIEMPO
 st.markdown("### ✉️ Despachar Informe por Correo Electrónico")
 c1, c2 = st.columns(2)
-destinatario = c1.text_input("📬 Correo Electrónico Destinatario", value=st.secrets.get("EMAIL", ""), placeholder="ejemplo@correo.com")
+destinatario = c1.text_input("📬 Correo Electrónico Destinatario", value=st.secrets.get("EMAIL = "tu-correo-jctraderanalysis@gmail.com"), placeholder="ejemplo@correo.com")
 asunto_correo = c2.text_input("✍️ Asunto del Mensaje", value="Reporte de Mercado - JC Trader Analysis")
 
 # Inicializamos el estado del texto del correo si no existe
