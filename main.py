@@ -29,7 +29,48 @@ lista_acciones = [x.strip() for x in acciones_input.split(",") if x.strip()]
 lista_forex = [x.strip() for x in forex_input.split(",") if x.strip()]
 lista_crypto = [x.strip() for x in crypto_input.split(",") if x.strip()]
 
+# --- PANTALLA PRINCIPAL ---
 st.title("📊 Cuadro de Mando Multitemporal Avanzado")
+
+# NUEVO: CAMPOS DE CORREO VISIBLES TODO EL TIEMPO
+st.markdown("### ✉️ Despachar Informe por Correo Electrónico")
+c1, c2 = st.columns(2)
+destinatario = c1.text_input("📬 Correo Electrónico Destinatario", placeholder="ejemplo@correo.com")
+asunto_correo = c2.text_input("✍️ Asunto del Mensaje", value="Reporte de Mercado - JC Trader Analysis")
+
+# Inicializamos el estado del texto del correo si no existe
+if 'texto_puro_correo' not in st.session_state:
+    st.session_state['texto_puro_correo'] = "No se ha realizado ningún escaneo todavía. Los datos están vacíos."
+
+# Formulario HTML invisible para procesar el envío mediante FormSubmit
+url_formulario = f"https://formsubmit.co/{destinatario}" if destinatario else "#"
+
+html_boton_correo = f"""
+<form action="{url_formulario}" method="POST" target="_blank">
+    <input type="hidden" name="_subject" value="{asunto_correo}">
+    <input type="hidden" name="Informe de Mercado" value="{st.session_state['texto_puro_correo']}">
+    <input type="hidden" name="_captcha" value="false">
+    <button type="submit" style="
+        background-color: #ff4b4b;
+        color: white;
+        border: none;
+        padding: 10px 24px;
+        font-size: 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        width: 100%;
+        font-weight: bold;
+        box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
+    ">📧 ENVIAR INFORME POR CORREO</button>
+</form>
+"""
+
+if destinatario:
+    st.markdown(html_boton_correo, unsafe_allow_html=True)
+else:
+    st.warning("Introduce un correo electrónico en el campo de arriba para activar el botón de envío.")
+
+st.markdown("---")
 
 def calcular_indicadores(df):
     if df.empty or len(df) < 30:
@@ -76,7 +117,7 @@ if st.sidebar.button("🚀 INICIAR ESCANEO MULTITEMPORAL", use_container_width=T
     datos_h1 = []
     datos_m5 = []
     resumen_alertas = []
-    texto_puro_correo = "" # Guardará el texto limpio para el cuerpo del correo
+    texto_puro_correo = ""
     
     todos_los_activos = [("Acciones", x) for x in lista_acciones] + [("Forex", x) for x in lista_forex] + [("Crypto", x) for x in lista_crypto]
     
@@ -135,7 +176,7 @@ if st.sidebar.button("🚀 INICIAR ESCANEO MULTITEMPORAL", use_container_width=T
                 txt_puro = f"VENTA FUERTE en {activo}. Precio: {round(lm5['Close'], dec)}. Soporte: {round(soporte_m5, dec)} | Resistencia: {round(res_m5, dec)}."
             elif t_h1_pura == "ALCISTA" and t_m5_pura == "ALCISTA":
                 recom = "🟡 COMPRA RIESGO"
-                txt = f"🟡 **{activo}** | **REBOTE EN CORTO**: Fuerza compradora en M5 y H1, pero ojo: la tendencia macro H4 está en {tendencia_h4}. Soporte: `{round(soporte_m5, dec)}`."
+                txt = f"🟡 **{activo}** | **REBOTE EN CORTO**: Fuerza compradora en M5 y H1, pero la tendencia macro H4 está en {tendencia_h4}. Soporte: `{round(soporte_m5, dec)}`."
                 txt_puro = f"REBOTE EN CORTO en {activo}. Precio: {round(lm5['Close'], dec)}. Soporte: {round(soporte_m5, dec)}."
             elif t_h1_pura == "BAJISTA" and t_m5_pura == "BAJISTA":
                 recom = "🟡 VENTA RIESGO"
@@ -159,14 +200,14 @@ if st.sidebar.button("🚀 INICIAR ESCANEO MULTITEMPORAL", use_container_width=T
         except Exception:
             pass
 
-    # Guardamos los datos del último escaneo en la sesión para que persistan al usar el correo
+    # Guardamos todo en el estado de la sesión para que persista al refrescar la interfaz
     st.session_state['resumen_alertas'] = resumen_alertas
     st.session_state['texto_puro_correo'] = texto_puro_correo
     st.session_state['datos_h4'] = datos_h4
     st.session_state['datos_h1'] = datos_h1
     st.session_state['datos_m5'] = datos_m5
 
-# --- MOSTRAR LOS RESULTADOS SI EXISTEN ---
+# --- MOSTRAR LOS RESULTADOS DEBAJO DEL BLOQUE DE CORREO ---
 if 'resumen_alertas' in st.session_state:
     st.subheader("📢 Resumen Ejecutivo e Informe de Mercado")
     col1, col2 = st.columns(2)
@@ -176,42 +217,9 @@ if 'resumen_alertas' in st.session_state:
         else:
             col2.markdown(alerta)
 
-    # --- NUEVO MÓDULO DE ENVÍO POR CORREO ---
-    st.markdown("### ✉️ Despachar Informe por Correo Electrónico")
-    c1, c2 = st.columns(2)
-    destinatario = c1.text_input("📬 Correo Electrónico Destinatario", placeholder="ejemplo@correo.com")
-    asunto_correo = c2.text_input("✍️ Asunto del Mensaje", value="Reporte de Mercado - JC Trader Analysis")
-    
-    # Formulario HTML invisible que procesa el envío mediante FormSubmit
-    url_formulario = f"https://formsubmit.co/{destinatario}" if destinatario else "#"
-    
-    html_boton_correo = f"""
-    <form action="{url_formulario}" method="POST" target="_blank">
-        <input type="hidden" name="_subject" value="{asunto_correo}">
-        <input type="hidden" name="Informe de Mercado" value="{st.session_state['texto_puro_correo']}">
-        <input type="hidden" name="_captcha" value="false">
-        <button type="submit" style="
-            background-color: #ff4b4b;
-            color: white;
-            border: none;
-            padding: 10px 24px;
-            font-size: 16px;
-            border-radius: 8px;
-            cursor: pointer;
-            width: 100%;
-            font-weight: bold;
-            box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
-        ">📧 ENVIAR INFORME POR CORREO</button>
-    </form>
-    """
-    if destinatario:
-        st.markdown(html_boton_correo, unsafe_allow_html=True)
-    else:
-        st.warning("Por favor introduce un correo electrónico válido para habilitar el botón de envío.")
-
     st.markdown("---")
 
-    # --- ESTILOS DE TABLAS ---
+    # --- LÓGICA DE ESTILOS ---
     def color_general(val):
         if "🟢" in str(val): return 'background-color: #d4edda; color: #155724; font-weight: bold;'
         if "🔴" in str(val): return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
